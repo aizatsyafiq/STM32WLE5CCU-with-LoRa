@@ -30,6 +30,7 @@
 #include <stdlib.h>
 #include "radio_driver.h"
 #include "bme280.h"
+#include <time.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -161,30 +162,30 @@ void showMenu(UART_HandleTypeDef *huart);
 /* USER CODE END 0 */
 
 /**
-  * @brief  The application entry point.
-  * @retval int
-  */
+ * @brief  The application entry point.
+ * @retval int
+ */
 int main(void)
 {
 
-  /* USER CODE BEGIN 1 */
+	/* USER CODE BEGIN 1 */
 	pingPongFSM_t fsm;
 	char uartBuff[100];
-  /* USER CODE END 1 */
+	/* USER CODE END 1 */
 
-  /* MCU Configuration--------------------------------------------------------*/
+	/* MCU Configuration--------------------------------------------------------*/
 
-  /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
-  HAL_Init();
+	/* Reset of all peripherals, Initializes the Flash interface and the Systick. */
+	HAL_Init();
 
-  /* USER CODE BEGIN Init */
+	/* USER CODE BEGIN Init */
 
-  /* USER CODE END Init */
+	/* USER CODE END Init */
 
-  /* Configure the system clock */
-  SystemClock_Config();
+	/* Configure the system clock */
+	SystemClock_Config();
 
-  /* USER CODE BEGIN SysInit */
+	/* USER CODE BEGIN SysInit */
 	/*** GPIO Configuration (for debugging) ***/
 	/* DEBUG_SUBGHZSPI_NSSOUT = PA4
 	 * DEBUG_SUBGHZSPI_SCKOUT = PA5
@@ -232,15 +233,15 @@ int main(void)
 	// RF_{IRQ0, IRQ1, IRQ2} pins
 	GPIO_InitStruct.Pin = GPIO_PIN_3 | GPIO_PIN_5 | GPIO_PIN_8;
 	HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
-  /* USER CODE END SysInit */
+	/* USER CODE END SysInit */
 
-  /* Initialize all configured peripherals */
-  MX_GPIO_Init();
-  MX_SUBGHZ_Init();
-  MX_I2C1_Init();
-  MX_USART1_UART_Init();
-  MX_USART2_UART_Init();
-  /* USER CODE BEGIN 2 */
+	/* Initialize all configured peripherals */
+	MX_GPIO_Init();
+	MX_SUBGHZ_Init();
+	MX_I2C1_Init();
+	MX_USART1_UART_Init();
+	MX_USART2_UART_Init();
+	/* USER CODE BEGIN 2 */
 	RadioLoRaBandwidths_t currentBandwidth = Bandwidths[LORA_BANDWIDTH];
 	uint32_t bandwidthHz = GetBandwidthInHz(currentBandwidth);
 
@@ -276,35 +277,42 @@ int main(void)
 	rslt = bme280_set_sensor_settings(BME280_OSR_PRESS_SEL | BME280_OSR_TEMP_SEL | BME280_OSR_HUM_SEL | BME280_FILTER_SEL, &dev);
 #endif
 
-  /* USER CODE END 2 */
+	/* USER CODE END 2 */
 
-  /* Infinite loop */
-  /* USER CODE BEGIN WHILE */
-//	uint32_t rnd = 0;
+	/* Infinite loop */
+	/* USER CODE BEGIN WHILE */
+	//	uint32_t rnd = 0;
 	SUBGRF_SetDioIrqParams(IRQ_RADIO_NONE, IRQ_RADIO_NONE, IRQ_RADIO_NONE, IRQ_RADIO_NONE);
-//	rnd = SUBGRF_GetRandom();
+	//	rnd = SUBGRF_GetRandom();
 
 	fsm.state = STATE_NULL;
 	fsm.subState = SSTATE_NULL;
 	fsm.rxTimeout = 3000; // 3000 ms
 	fsm.rxMargin = 200;   // 200 ms
-//	fsm.randomDelay = rnd >> 22; // [0, 1023] ms
+	//	fsm.randomDelay = rnd >> 22; // [0, 1023] ms
 
-//	HAL_Delay(fsm.randomDelay);
+	//	HAL_Delay(fsm.randomDelay);
 	SUBGRF_SetDioIrqParams( IRQ_RX_DONE | IRQ_RX_TX_TIMEOUT | IRQ_CRC_ERROR,
 			IRQ_RX_DONE | IRQ_RX_TX_TIMEOUT | IRQ_CRC_ERROR,
 			IRQ_RADIO_NONE,
 			IRQ_RADIO_NONE );
-//	SUBGRF_SetSwitch(RFO_LP, RFSWITCH_RX);
-//	SUBGRF_SetRx(fsm.rxTimeout << 6);
-//	fsm.state = STATE_MASTER;
-//	fsm.subState = SSTATE_RX;
+	//	SUBGRF_SetSwitch(RFO_LP, RFSWITCH_RX);
+	//	SUBGRF_SetRx(fsm.rxTimeout << 6);
+	//	fsm.state = STATE_MASTER;
+	//	fsm.subState = SSTATE_RX;
 
-	//startUpFWCheck(&huart1, &hi2c1);
+	//datetime
+	uint32_t elapsedTimeSinceTimeChanged = 0; //+unix = elapsedTime - timeChange. timeChanged = current hal_tick when unix was changed
+	uint32_t timeChangeInSeconds = 0;
+	const uint32_t gmtPlus8Offset = 8 * 3600; //gmt+8 offset, add this to unix
+	time_t unix_timestamp = 1730127496;
+
+	startUpFWCheck(&huart1, &hi2c1);
 	blinkLED();
 
 	char rxData[20];
 	char selection = 'x';
+
 
 	while (1) //AAAAAAAAAAAAAAAA
 	{
@@ -319,8 +327,8 @@ int main(void)
 				}
 			}
 			//mock
-			HAL_Delay(4000);
-			selection = '1';
+//			HAL_Delay(4000);
+//			selection = '1';
 		}
 
 		switch(selection){
@@ -350,13 +358,60 @@ int main(void)
 			printBoardInfo(&huart1);
 			break;
 		case '3':
-			HAL_UART_Transmit(&huart1, (uint8_t*)"Not implemented yet\r\n", 21, HAL_MAX_DELAY);
-			//TODO - unfinished
+			HAL_UART_Transmit(&huart2, (uint8_t*)"Enter UNIX time : ", 18, HAL_MAX_DELAY);
+			uint8_t unixInputArray[10] = {0};
+			uint8_t unixInputArrayCounter = 0;
+			uint32_t newUnix = 0;
+			while(1){
+				if(HAL_UART_Receive(&huart2, (uint8_t *)rxData, 1, 0) == HAL_OK){
+					char buffer[15];
+					snprintf(buffer, sizeof(buffer), "%c", rxData[0]);
+					HAL_UART_Transmit(&huart2, (uint8_t*)buffer, 1, HAL_MAX_DELAY);
+					if(rxData[0] != '\0' &&
+							rxData[0] != EOF &&
+							rxData[0] != '\r' &&
+							rxData[0] != '\n' &&
+							rxData[0] >= '0' &&
+							rxData[0] <= '9' ){
+						//Convert char into int, save into array, increment counter for array, once at 10 digit,
+						//save as unix, convert to time, save to timeBuffer
+						//char to int
+						unixInputArray[unixInputArrayCounter] = rxData[0] - '0';
+						//+counter for array
+						unixInputArrayCounter++;
+						//if input 10 digit -> save the value into newUnix
+						if(unixInputArrayCounter == 10){
+							for(int i=0; i<10; i++){
+								newUnix = newUnix * 10 + unixInputArray[i];
+							}
+							//save newUnix to unix_timestamp
+							unix_timestamp = (time_t)newUnix;
+							//get current time for time settings change, for
+							//elapsedTimeSinceTimeChanged
+							timeChangeInSeconds = (int)(HAL_GetTick()/1000);
+							//end message, reset
+							HAL_UART_Transmit(&huart2, (uint8_t*)"\nUNIX time change successful\r\n", 30, HAL_MAX_DELAY);
+							break;
+						}
+					}else{
+						//remove this:
+						HAL_UART_Transmit(&huart2, (uint8_t*)"\nBad input. Back to menu.\r\n", 27, HAL_MAX_DELAY);
+						//break/restart if input not valid
+						break;
+					}
+				}
+			}
 			break;
 		case '4':
-			//TODO
-			//display time
-			HAL_UART_Transmit(&huart1, (uint8_t*)"Not implemented yet\r\n", 21, HAL_MAX_DELAY);
+			//new time = current unix time + seconds elapsed since last unix set
+			char time_str[17];
+			char timeBuffer[44];
+			elapsedTimeSinceTimeChanged = (int)(HAL_GetTick()/1000) - timeChangeInSeconds;
+			time_t adjustedTime = unix_timestamp + gmtPlus8Offset + elapsedTimeSinceTimeChanged;
+			struct tm *local_time = localtime(&adjustedTime);
+			strftime(time_str, sizeof(time_str), "%d-%m-%Y %H:%M", local_time);
+			snprintf(timeBuffer, sizeof(timeBuffer), "Current datetime (GMT+8) : %s", time_str);
+			HAL_UART_Transmit(&huart2, (uint8_t *)timeBuffer, sizeof(timeBuffer), HAL_MAX_DELAY);
 			break;
 		case '0':
 			showMenu(&huart1);
@@ -378,52 +433,52 @@ int main(void)
 #if BME280_CONNECTED == 1
 		measureBME(&huart1);
 #endif
-    /* USER CODE END WHILE */
+		/* USER CODE END WHILE */
 
-    /* USER CODE BEGIN 3 */
+		/* USER CODE BEGIN 3 */
 	}
-  /* USER CODE END 3 */
+	/* USER CODE END 3 */
 }
 
 /**
-  * @brief System Clock Configuration
-  * @retval None
-  */
+ * @brief System Clock Configuration
+ * @retval None
+ */
 void SystemClock_Config(void)
 {
-  RCC_OscInitTypeDef RCC_OscInitStruct = {0};
-  RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
+	RCC_OscInitTypeDef RCC_OscInitStruct = {0};
+	RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
 
-  /** Configure the main internal regulator output voltage
-  */
-  __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
+	/** Configure the main internal regulator output voltage
+	 */
+	__HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
 
-  /** Initializes the CPU, AHB and APB buses clocks
-  */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
-  RCC_OscInitStruct.HSEState = RCC_HSE_ON;
-  RCC_OscInitStruct.HSEDiv = RCC_HSE_DIV1;
-  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_NONE;
-  if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
-  {
-    Error_Handler();
-  }
+	/** Initializes the CPU, AHB and APB buses clocks
+	 */
+	RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+	RCC_OscInitStruct.HSEState = RCC_HSE_ON;
+	RCC_OscInitStruct.HSEDiv = RCC_HSE_DIV1;
+	RCC_OscInitStruct.PLL.PLLState = RCC_PLL_NONE;
+	if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
+	{
+		Error_Handler();
+	}
 
-  /** Configure the SYSCLKSource, HCLK, PCLK1 and PCLK2 clocks dividers
-  */
-  RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK3|RCC_CLOCKTYPE_HCLK
-                              |RCC_CLOCKTYPE_SYSCLK|RCC_CLOCKTYPE_PCLK1
-                              |RCC_CLOCKTYPE_PCLK2;
-  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_HSE;
-  RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
-  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
-  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
-  RCC_ClkInitStruct.AHBCLK3Divider = RCC_SYSCLK_DIV1;
+	/** Configure the SYSCLKSource, HCLK, PCLK1 and PCLK2 clocks dividers
+	 */
+	RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK3|RCC_CLOCKTYPE_HCLK
+			|RCC_CLOCKTYPE_SYSCLK|RCC_CLOCKTYPE_PCLK1
+			|RCC_CLOCKTYPE_PCLK2;
+	RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_HSE;
+	RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
+	RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
+	RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
+	RCC_ClkInitStruct.AHBCLK3Divider = RCC_SYSCLK_DIV1;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_1) != HAL_OK)
-  {
-    Error_Handler();
-  }
+	if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_1) != HAL_OK)
+	{
+		Error_Handler();
+	}
 }
 
 /* USER CODE BEGIN 4 */
@@ -582,7 +637,7 @@ void eventRxError(pingPongFSM_t *const fsm)
 void enterMasterRx(pingPongFSM_t *const fsm)
 {
 	switchReceiveOn();
-//	HAL_Delay(1000);
+	//	HAL_Delay(1000);
 	HAL_UART_Transmit(&huart1, (uint8_t *)"Master Rx start\r\n", 17, HAL_MAX_DELAY);
 	SUBGRF_SetDioIrqParams( IRQ_RX_DONE | IRQ_RX_TX_TIMEOUT | IRQ_CRC_ERROR | IRQ_HEADER_ERROR,
 			IRQ_RX_DONE | IRQ_RX_TX_TIMEOUT | IRQ_CRC_ERROR | IRQ_HEADER_ERROR,
@@ -601,7 +656,7 @@ void enterMasterRx(pingPongFSM_t *const fsm)
  */
 void enterSlaveRx(pingPongFSM_t *const fsm)
 {
-//
+	//
 }
 
 /**
@@ -613,22 +668,22 @@ void enterMasterTx(pingPongFSM_t *const fsm)
 {
 	//not used
 
-//	switchTransmitOn();
-//
-//	HAL_UART_Transmit(&huart1, (uint8_t *)"Master Tx start\r\n", 17, HAL_MAX_DELAY);
-//	SUBGRF_SetDioIrqParams( IRQ_TX_DONE | IRQ_RX_TX_TIMEOUT,
-//			IRQ_TX_DONE | IRQ_RX_TX_TIMEOUT,
-//			IRQ_RADIO_NONE,
-//			IRQ_RADIO_NONE );
-//	SUBGRF_SetSwitch(RFO_HP, RFSWITCH_TX);
-//	// Workaround 5.1 in DS.SX1261-2.W.APP (before each packet transmission)
-//	SUBGRF_WriteRegister(0x0889, (SUBGRF_ReadRegister(0x0889) | 0x04));
-//	packetParams.Params.LoRa.PayloadLength = PAYLOADLENGTH;
-//	SUBGRF_SetPacketParams(&packetParams);
-//	SUBGRF_SendPayload((uint8_t *)"ABCDEFGHIJKLMNOPQRST", PAYLOADLENGTH, 0);
-//
-//	HAL_Delay(2500);
-//	switchTransmitOff();
+	//	switchTransmitOn();
+	//
+	//	HAL_UART_Transmit(&huart1, (uint8_t *)"Master Tx start\r\n", 17, HAL_MAX_DELAY);
+	//	SUBGRF_SetDioIrqParams( IRQ_TX_DONE | IRQ_RX_TX_TIMEOUT,
+	//			IRQ_TX_DONE | IRQ_RX_TX_TIMEOUT,
+	//			IRQ_RADIO_NONE,
+	//			IRQ_RADIO_NONE );
+	//	SUBGRF_SetSwitch(RFO_HP, RFSWITCH_TX);
+	//	// Workaround 5.1 in DS.SX1261-2.W.APP (before each packet transmission)
+	//	SUBGRF_WriteRegister(0x0889, (SUBGRF_ReadRegister(0x0889) | 0x04));
+	//	packetParams.Params.LoRa.PayloadLength = PAYLOADLENGTH;
+	//	SUBGRF_SetPacketParams(&packetParams);
+	//	SUBGRF_SendPayload((uint8_t *)"ABCDEFGHIJKLMNOPQRST", PAYLOADLENGTH, 0);
+	//
+	//	HAL_Delay(2500);
+	//	switchTransmitOff();
 }
 
 /**
@@ -638,7 +693,7 @@ void enterMasterTx(pingPongFSM_t *const fsm)
  */
 void enterSlaveTx(pingPongFSM_t *const fsm)
 {
-//
+	//
 }
 
 
@@ -915,7 +970,7 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size){
 }
 
 void showMenu(UART_HandleTypeDef *huart){
-	HAL_UART_Transmit(huart, (uint8_t*)"\nCM IN GS MODE\r\n", 16, HAL_MAX_DELAY);
+	HAL_UART_Transmit(huart, (uint8_t*)"\n\nCM IN GS MODE\r\n", 17, HAL_MAX_DELAY);
 	HAL_UART_Transmit(huart, (uint8_t*)"************************************************\n", 49, HAL_MAX_DELAY);
 	HAL_UART_Transmit(huart, (uint8_t*)"* SELECT OPTION :                              *\n", 49, HAL_MAX_DELAY);
 	HAL_UART_Transmit(huart, (uint8_t*)"* [1] Transmit command to SM and enter RX MODE *\n", 49, HAL_MAX_DELAY);
@@ -929,33 +984,33 @@ void showMenu(UART_HandleTypeDef *huart){
 /* USER CODE END 4 */
 
 /**
-  * @brief  This function is executed in case of error occurrence.
-  * @retval None
-  */
+ * @brief  This function is executed in case of error occurrence.
+ * @retval None
+ */
 void Error_Handler(void)
 {
-  /* USER CODE BEGIN Error_Handler_Debug */
+	/* USER CODE BEGIN Error_Handler_Debug */
 	/* User can add his own implementation to report the HAL error return state */
 	__disable_irq();
 	while (1)
 	{
 	}
-  /* USER CODE END Error_Handler_Debug */
+	/* USER CODE END Error_Handler_Debug */
 }
 
 #ifdef  USE_FULL_ASSERT
 /**
-  * @brief  Reports the name of the source file and the source line number
-  *         where the assert_param error has occurred.
-  * @param  file: pointer to the source file name
-  * @param  line: assert_param error line source number
-  * @retval None
-  */
+ * @brief  Reports the name of the source file and the source line number
+ *         where the assert_param error has occurred.
+ * @param  file: pointer to the source file name
+ * @param  line: assert_param error line source number
+ * @retval None
+ */
 void assert_failed(uint8_t *file, uint32_t line)
 {
-  /* USER CODE BEGIN 6 */
+	/* USER CODE BEGIN 6 */
 	/* User can add his own implementation to report the file name and line number,
      ex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
-  /* USER CODE END 6 */
+	/* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */

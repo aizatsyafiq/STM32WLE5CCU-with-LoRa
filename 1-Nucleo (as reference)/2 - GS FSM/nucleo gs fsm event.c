@@ -30,6 +30,7 @@
 #include <stdio.h>
 #include "radio_driver.h"
 #include "stm32wlxx_nucleo.h"
+#include <time.h>
 
 /* USER CODE END Includes */
 
@@ -252,6 +253,18 @@ int main(void)
 
 	printUid(&huart2);
 
+	//datetime
+	uint32_t elapsedTimeSinceTimeChanged = 0; //+unix = elapsedTime - timeChange. timeChanged = current hal_tick when unix was changed
+	uint32_t timeChangeInSeconds = 0;
+	const uint32_t gmtPlus8Offset = 8 * 3600; //gmt+8 offset, add this to unix
+    time_t unix_timestamp = 1730127496;
+//   struct tm *local_time = localtime(&unix_timestamp);
+    char time_str[17];
+//   strftime(time_str, sizeof(time_str), "%d-%m-%Y %H:%M", local_time);
+	char timeBuffer[44];
+//	snprintf(timeBuffer, sizeof(timeBuffer), "Current datetime (GMT+8) : %s", time_str);
+//	HAL_UART_Transmit(&huart2, (uint8_t *)timeBuffer, sizeof(timeBuffer), HAL_MAX_DELAY);
+
 	//for GS FSM - using event
 	char rxData[20];
 	char selection = 'x';
@@ -299,12 +312,58 @@ int main(void)
 			printBoardInfo(&huart2);
 			break;
 		case '3':
-			HAL_UART_Transmit(&huart2, (uint8_t*)"Not implemented yet\r\n", 21, HAL_MAX_DELAY);
+			HAL_UART_Transmit(&huart2, (uint8_t*)"Enter UNIX time : ", 18, HAL_MAX_DELAY);
+			uint8_t unixInputArray[10] = {0};
+			uint8_t unixInputArrayCounter = 0;
+			uint32_t newUnix = 0;
+			while(1){
+				if(HAL_UART_Receive(&huart2, (uint8_t *)rxData, 1, 0) == HAL_OK){
+					char buffer[15];
+					snprintf(buffer, sizeof(buffer), "%c", rxData[0]);
+					HAL_UART_Transmit(&huart2, (uint8_t*)buffer, 1, HAL_MAX_DELAY);
+					if(rxData[0] != '\0' &&
+							rxData[0] != EOF &&
+							rxData[0] != '\r' &&
+							rxData[0] != '\n' &&
+							rxData[0] >= '0' &&
+							rxData[0] <= '9' ){
+						//Convert char into int, save into array, increment counter for array, once at 10 digit,
+						//save as unix, convert to time, save to timeBuffer
+						//char to int
+						unixInputArray[unixInputArrayCounter] = rxData[0] - '0';
+						//+counter for array
+						unixInputArrayCounter++;
+						//if input 10 digit -> save the value into newUnix
+						if(unixInputArrayCounter == 10){
+							for(int i=0; i<10; i++){
+								newUnix = newUnix * 10 + unixInputArray[i];
+							}
+							//save newUnix to unix_timestamp
+							unix_timestamp = (time_t)newUnix;
+							//get current time for time settings change, for
+							//elapsedTimeSinceTimeChanged
+							timeChangeInSeconds = (int)(HAL_GetTick()/1000);
+							//end message, reset
+							HAL_UART_Transmit(&huart2, (uint8_t*)"\nUNIX time change successful\r\n", 30, HAL_MAX_DELAY);
+							break;
+						}
+					}else{
+						//remove this:
+						HAL_UART_Transmit(&huart2, (uint8_t*)"\nBad input. Back to menu.\r\n", 27, HAL_MAX_DELAY);
+						//break/restart if input not valid
+						break;
+					}
+				}
+			}
 			break;
 		case '4':
-			//TODO
-			//display time
-			HAL_UART_Transmit(&huart2, (uint8_t*)"Not implemented yet\r\n", 21, HAL_MAX_DELAY);
+			//new time = current unix time + seconds elapsed since last unix set
+			elapsedTimeSinceTimeChanged = (int)(HAL_GetTick()/1000) - timeChangeInSeconds;
+			time_t adjustedTime = unix_timestamp + gmtPlus8Offset + elapsedTimeSinceTimeChanged;
+			struct tm *local_time = localtime(&adjustedTime);
+			strftime(time_str, sizeof(time_str), "%d-%m-%Y %H:%M", local_time);
+			snprintf(timeBuffer, sizeof(timeBuffer), "Current datetime (GMT+8) : %s", time_str);
+			HAL_UART_Transmit(&huart2, (uint8_t *)timeBuffer, sizeof(timeBuffer), HAL_MAX_DELAY);
 			break;
 		case '0':
 			showMenu(&huart2);
@@ -668,7 +727,7 @@ uint32_t GetBandwidthInHz(RadioLoRaBandwidths_t bandwidth){
 }
 
 void showMenu(UART_HandleTypeDef *huart){
-	HAL_UART_Transmit(huart, (uint8_t*)"\nCM IN GS MODE\r\n", 16, HAL_MAX_DELAY);
+	HAL_UART_Transmit(huart, (uint8_t*)"\n\nCM IN GS MODE\r\n", 16, HAL_MAX_DELAY);
 	HAL_UART_Transmit(huart, (uint8_t*)"************************************************\n", 49, HAL_MAX_DELAY);
 	HAL_UART_Transmit(huart, (uint8_t*)"* SELECT OPTION :                              *\n", 49, HAL_MAX_DELAY);
 	HAL_UART_Transmit(huart, (uint8_t*)"* [1] Transmit command to SM and enter RX MODE *\n", 49, HAL_MAX_DELAY);
