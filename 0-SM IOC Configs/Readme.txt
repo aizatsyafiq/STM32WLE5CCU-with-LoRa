@@ -2,4 +2,4 @@
 
 Using UART1 for display
 
-RTC is disabled
+pin config image removed for now
