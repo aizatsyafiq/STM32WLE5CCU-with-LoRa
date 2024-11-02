@@ -79,7 +79,7 @@ typedef struct
 #define TXRX_ENABLED								0	/* 1 = enable Tx/Rx in while loop. 0 = disable any Tx and Rx */
 #define TRANSMIT_ONLY								1	/* 1 = set to transmit only. 0 = ping pong */
 #define RECEIVE_ONLY								1	/* 1 = set to receive only. 0 = ping pong */
-#define FIRMWARE_FILENAME							"CM_WLE55CCU6_2.bin"
+#define FIRMWARE_FILENAME							"CM_GS.bin"
 #define FIRMWARE_VERSION							"0.1"
 #define PAYLOADLENGTH								20
 
@@ -119,6 +119,13 @@ uint8_t TxData[16];
 uint8_t RxData[16];
 int indx = 0;
 
+//for uart user input
+uint8_t rx_buff_int[1];
+uint8_t rx_buff[20];
+uint8_t rx_buff_user[20];
+uint8_t rx_buff_count = 0;
+bool rxDone = false;
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -140,8 +147,9 @@ void blinkLED(void);
 void printUid(UART_HandleTypeDef *huart);
 void printBoardInfo(UART_HandleTypeDef *huart);
 void checki2cInitialize(I2C_HandleTypeDef *hi2c, UART_HandleTypeDef *huart);
+void checki2c2Initialize(I2C_HandleTypeDef *hi2c, UART_HandleTypeDef *huart);
 void checkLoraInit(UART_HandleTypeDef *huart);
-void startUpFWCheck(UART_HandleTypeDef *huart, I2C_HandleTypeDef *hi2c);
+void startUpFWCheck(UART_HandleTypeDef *huart);
 uint32_t GetBandwidthInHz(RadioLoRaBandwidths_t bandwidth);
 void switchTransmitOn(void);
 void switchTransmitOff(void);
@@ -162,30 +170,30 @@ void showMenu(UART_HandleTypeDef *huart);
 /* USER CODE END 0 */
 
 /**
- * @brief  The application entry point.
- * @retval int
- */
+  * @brief  The application entry point.
+  * @retval int
+  */
 int main(void)
 {
 
-	/* USER CODE BEGIN 1 */
+  /* USER CODE BEGIN 1 */
 	pingPongFSM_t fsm;
-	char uartBuff[100];
-	/* USER CODE END 1 */
+//	char uartBuff[100];
+  /* USER CODE END 1 */
 
-	/* MCU Configuration--------------------------------------------------------*/
+  /* MCU Configuration--------------------------------------------------------*/
 
-	/* Reset of all peripherals, Initializes the Flash interface and the Systick. */
-	HAL_Init();
+  /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
+  HAL_Init();
 
-	/* USER CODE BEGIN Init */
+  /* USER CODE BEGIN Init */
 
-	/* USER CODE END Init */
+  /* USER CODE END Init */
 
-	/* Configure the system clock */
-	SystemClock_Config();
+  /* Configure the system clock */
+  SystemClock_Config();
 
-	/* USER CODE BEGIN SysInit */
+  /* USER CODE BEGIN SysInit */
 	/*** GPIO Configuration (for debugging) ***/
 	/* DEBUG_SUBGHZSPI_NSSOUT = PA4
 	 * DEBUG_SUBGHZSPI_SCKOUT = PA5
@@ -233,22 +241,23 @@ int main(void)
 	// RF_{IRQ0, IRQ1, IRQ2} pins
 	GPIO_InitStruct.Pin = GPIO_PIN_3 | GPIO_PIN_5 | GPIO_PIN_8;
 	HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
-	/* USER CODE END SysInit */
+  /* USER CODE END SysInit */
 
-	/* Initialize all configured peripherals */
-	MX_GPIO_Init();
-	MX_SUBGHZ_Init();
-	MX_I2C1_Init();
-	MX_USART1_UART_Init();
-	MX_USART2_UART_Init();
-	/* USER CODE BEGIN 2 */
-	RadioLoRaBandwidths_t currentBandwidth = Bandwidths[LORA_BANDWIDTH];
-	uint32_t bandwidthHz = GetBandwidthInHz(currentBandwidth);
+  /* Initialize all configured peripherals */
+  MX_GPIO_Init();
+  MX_SUBGHZ_Init();
+  MX_I2C1_Init();
+  MX_USART1_UART_Init();
+  MX_USART2_UART_Init();
+  MX_I2C2_Init();
+  /* USER CODE BEGIN 2 */
+//	RadioLoRaBandwidths_t currentBandwidth = Bandwidths[LORA_BANDWIDTH];
+//	uint32_t bandwidthHz = GetBandwidthInHz(currentBandwidth);
 
 	HAL_Delay(2000);
 
-	sprintf(uartBuff, "LORA_MODULATION\r\nLORA_BW=%lu Hz\r\nLORA_SF=%d\r\n", bandwidthHz, LORA_SPREADING_FACTOR);
-	HAL_UART_Transmit(&huart1, (uint8_t *)uartBuff, strlen(uartBuff), HAL_MAX_DELAY);
+//	sprintf(uartBuff, "LORA_MODULATION\r\nLORA_BW=%lu Hz\r\nLORA_SF=%d\r\n", bandwidthHz, LORA_SPREADING_FACTOR);
+//	HAL_UART_Transmit(&huart1, (uint8_t *)uartBuff, strlen(uartBuff), HAL_MAX_DELAY);
 	radioInit();
 
 #if RS485_CONNECTED == 1
@@ -277,10 +286,12 @@ int main(void)
 	rslt = bme280_set_sensor_settings(BME280_OSR_PRESS_SEL | BME280_OSR_TEMP_SEL | BME280_OSR_HUM_SEL | BME280_FILTER_SEL, &dev);
 #endif
 
-	/* USER CODE END 2 */
+	//for uart receive
+	HAL_UART_Receive_IT(&huart1, rx_buff_int, 1);
+  /* USER CODE END 2 */
 
-	/* Infinite loop */
-	/* USER CODE BEGIN WHILE */
+  /* Infinite loop */
+  /* USER CODE BEGIN WHILE */
 	//	uint32_t rnd = 0;
 	SUBGRF_SetDioIrqParams(IRQ_RADIO_NONE, IRQ_RADIO_NONE, IRQ_RADIO_NONE, IRQ_RADIO_NONE);
 	//	rnd = SUBGRF_GetRandom();
@@ -307,29 +318,49 @@ int main(void)
 	const uint32_t gmtPlus8Offset = 8 * 3600; //gmt+8 offset, add this to unix
 	time_t unix_timestamp = 1730127496;
 
-	startUpFWCheck(&huart1, &hi2c1);
+	startUpFWCheck(&huart1);
 	blinkLED();
 
-	char rxData[20];
+//	char rxData[20];
 	char selection = 'x';
 
 
 	while (1) //AAAAAAAAAAAAAAAA
 	{
 		showMenu(&huart1);
-		while(selection == 'x'){
-			if(HAL_UART_Receive(&huart1, (uint8_t *)rxData, 1, 0) == HAL_OK){
-				char buffer[15];
-				if(rxData[0] != '\0' && rxData[0] != EOF && rxData[0] != '\r' && rxData[0] != '\n'){
-					selection = rxData[0];
-					snprintf(buffer, sizeof(buffer), "Entered : %c\r\n", selection);
-					HAL_UART_Transmit(&huart1, (uint8_t*)buffer, 13, HAL_MAX_DELAY);
-				}
-			}
-			//mock
-//			HAL_Delay(4000);
-//			selection = '1';
-		}
+		HAL_UART_Transmit(&huart1, (uint8_t *)"Enter an option:\r\n", 18, HAL_MAX_DELAY);
+
+		//method 1 : uart receive (does not work on SM)
+		//		while(selection == 'x'){
+		//			if(HAL_UART_Receive(&huart1, (uint8_t *)rxData, 1, 0) == HAL_OK){
+		//				char buffer[15];
+		//				if(rxData[0] != '\0' && rxData[0] != EOF && rxData[0] != '\r' && rxData[0] != '\n'){
+		//					selection = rxData[0];
+		//					snprintf(buffer, sizeof(buffer), "Entered : %c\r\n", selection);
+		//					HAL_UART_Transmit(&huart1, (uint8_t*)buffer, 13, HAL_MAX_DELAY);
+		//				}
+		//			}
+		//			//mock
+		////			HAL_Delay(4000);
+		////			selection = '1';
+		//		}
+
+		//method 2 : uart receive
+		while(rxDone == false);
+		selection = rx_buff[0];
+		memset(rx_buff, 0, sizeof(rx_buff));
+		HAL_Delay(50);
+//		selection = rx_buff[0];
+		//only reset the flag after copied everything
+		rxDone = false;
+
+//		snprintf(buffer, sizeof(buffer), "%c ", rx_buff_user[0]);
+//		HAL_UART_Transmit(&huart1, (uint8_t *)buffer, 2, HAL_MAX_DELAY);
+//		snprintf(buffer, sizeof(buffer), "%c ", rx_buff_user[1]);
+//		HAL_UART_Transmit(&huart1, (uint8_t *)buffer, 2, HAL_MAX_DELAY);
+//		snprintf(buffer, sizeof(buffer), "%c ", rx_buff_user[2]);
+//		HAL_UART_Transmit(&huart1, (uint8_t *)buffer, 2, HAL_MAX_DELAY);
+
 
 		switch(selection){
 		case '1':
@@ -358,49 +389,92 @@ int main(void)
 			printBoardInfo(&huart1);
 			break;
 		case '3':
-			HAL_UART_Transmit(&huart2, (uint8_t*)"Enter UNIX time : ", 18, HAL_MAX_DELAY);
+			HAL_UART_Transmit(&huart1, (uint8_t*)"Enter UNIX time : ", 18, HAL_MAX_DELAY);
+
+			//method 1 uart receive (does not work on SM)
+			//			uint8_t unixInputArray[10] = {0};
+			//			uint8_t unixInputArrayCounter = 0;
+			//			uint32_t newUnix = 0;
+			//			while(1){
+			//				if(HAL_UART_Receive(&huart1, (uint8_t *)rxData, 1, 0) == HAL_OK){
+			//					char buffer[15];
+			//					snprintf(buffer, sizeof(buffer), "%c", rxData[0]);
+			//					HAL_UART_Transmit(&huart1, (uint8_t*)buffer, 1, HAL_MAX_DELAY);
+			//					if(rxData[0] != '\0' &&
+			//							rxData[0] != EOF &&
+			//							rxData[0] != '\r' &&
+			//							rxData[0] != '\n' &&
+			//							rxData[0] >= '0' &&
+			//							rxData[0] <= '9' ){
+			//						//Convert char into int, save into array, increment counter for array, once at 10 digit,
+			//						//save as unix, convert to time, save to timeBuffer
+			//						//char to int
+			//						unixInputArray[unixInputArrayCounter] = rxData[0] - '0';
+			//						//+counter for array
+			//						unixInputArrayCounter++;
+			//						//if input 10 digit -> save the value into newUnix
+			//						if(unixInputArrayCounter == 10){
+			//							for(int i=0; i<10; i++){
+			//								newUnix = newUnix * 10 + unixInputArray[i];
+			//							}
+			//							//save newUnix to unix_timestamp
+			//							unix_timestamp = (time_t)newUnix;
+			//							//get current time for time settings change, for
+			//							//elapsedTimeSinceTimeChanged
+			//							timeChangeInSeconds = (int)(HAL_GetTick()/1000);
+			//							//end message, reset
+			//							HAL_UART_Transmit(&huart1, (uint8_t*)"\nUNIX time change successful\r\n", 30, HAL_MAX_DELAY);
+			//							break;
+			//						}
+			//					}else{
+			//						//remove this:
+			//						HAL_UART_Transmit(&huart1, (uint8_t*)"\nBad input. Back to menu.\r\n", 27, HAL_MAX_DELAY);
+			//						//break/restart if input not valid
+			//						break;
+			//					}
+			//				}
+			//			}
+
+			//method 2 uart receive
 			uint8_t unixInputArray[10] = {0};
-			uint8_t unixInputArrayCounter = 0;
 			uint32_t newUnix = 0;
-			while(1){
-				if(HAL_UART_Receive(&huart2, (uint8_t *)rxData, 1, 0) == HAL_OK){
-					char buffer[15];
-					snprintf(buffer, sizeof(buffer), "%c", rxData[0]);
-					HAL_UART_Transmit(&huart2, (uint8_t*)buffer, 1, HAL_MAX_DELAY);
-					if(rxData[0] != '\0' &&
-							rxData[0] != EOF &&
-							rxData[0] != '\r' &&
-							rxData[0] != '\n' &&
-							rxData[0] >= '0' &&
-							rxData[0] <= '9' ){
-						//Convert char into int, save into array, increment counter for array, once at 10 digit,
-						//save as unix, convert to time, save to timeBuffer
-						//char to int
-						unixInputArray[unixInputArrayCounter] = rxData[0] - '0';
-						//+counter for array
-						unixInputArrayCounter++;
-						//if input 10 digit -> save the value into newUnix
-						if(unixInputArrayCounter == 10){
-							for(int i=0; i<10; i++){
-								newUnix = newUnix * 10 + unixInputArray[i];
-							}
-							//save newUnix to unix_timestamp
-							unix_timestamp = (time_t)newUnix;
-							//get current time for time settings change, for
-							//elapsedTimeSinceTimeChanged
-							timeChangeInSeconds = (int)(HAL_GetTick()/1000);
-							//end message, reset
-							HAL_UART_Transmit(&huart2, (uint8_t*)"\nUNIX time change successful\r\n", 30, HAL_MAX_DELAY);
-							break;
+			while(rxDone == false);
+			memcpy(rx_buff_user, rx_buff, sizeof(rx_buff));
+			HAL_Delay(50);
+			memset(rx_buff, 0, sizeof(rx_buff));
+			HAL_Delay(50);
+			rxDone = false;
+
+			for(int i=0; i<10; i++){
+				if(rx_buff_user[i] != '\0' &&
+						rx_buff_user[i] != EOF &&
+						rx_buff_user[i] != '\r' &&
+						rx_buff_user[i] != '\n' &&
+						rx_buff_user[i] >= '0' &&
+						rx_buff_user[i] <= '9' ){
+					//Convert char into int, save into array, increment counter for array, once at 10 digit,
+					//save as unix, convert to time, save to timeBuffer
+					//char to int
+					unixInputArray[i] = rx_buff_user[i] - '0';
+					//if input 10 digit -> save the value into newUnix
+					if(i == 9){
+						for(int i=0; i<10; i++){
+							newUnix = newUnix * 10 + unixInputArray[i];
 						}
-					}else{
-						//remove this:
-						HAL_UART_Transmit(&huart2, (uint8_t*)"\nBad input. Back to menu.\r\n", 27, HAL_MAX_DELAY);
-						//break/restart if input not valid
+						//save newUnix to unix_timestamp
+						unix_timestamp = (time_t)newUnix;
+						//get current time for time settings change, for
+						//elapsedTimeSinceTimeChanged
+						timeChangeInSeconds = (int)(HAL_GetTick()/1000);
+						//end message, reset
+						HAL_UART_Transmit(&huart1, (uint8_t*)"\nUNIX time change successful\r\n", 30, HAL_MAX_DELAY);
 						break;
 					}
 				}
+
 			}
+			memset(rx_buff_user, 0, sizeof(rx_buff_user));
+			HAL_Delay(50);
 			break;
 		case '4':
 			//new time = current unix time + seconds elapsed since last unix set
@@ -411,10 +485,10 @@ int main(void)
 			struct tm *local_time = localtime(&adjustedTime);
 			strftime(time_str, sizeof(time_str), "%d-%m-%Y %H:%M", local_time);
 			snprintf(timeBuffer, sizeof(timeBuffer), "Current datetime (GMT+8) : %s", time_str);
-			HAL_UART_Transmit(&huart2, (uint8_t *)timeBuffer, sizeof(timeBuffer), HAL_MAX_DELAY);
+			HAL_UART_Transmit(&huart1, (uint8_t *)timeBuffer, sizeof(timeBuffer), HAL_MAX_DELAY);
 			break;
 		case '0':
-			showMenu(&huart1);
+			//showMenu(&huart1); //redundant
 			break;
 		default:
 			HAL_UART_Transmit(&huart1, (uint8_t*)"INVALID SELECTION\n", 18, HAL_MAX_DELAY);
@@ -422,6 +496,8 @@ int main(void)
 		}
 		//reset selection
 		selection = 'x';
+//		memset(rx_buff, 0, sizeof(rx_buff));
+//		HAL_Delay(50);
 
 
 #if RS485_CONNECTED == 1
@@ -433,52 +509,52 @@ int main(void)
 #if BME280_CONNECTED == 1
 		measureBME(&huart1);
 #endif
-		/* USER CODE END WHILE */
+    /* USER CODE END WHILE */
 
-		/* USER CODE BEGIN 3 */
+    /* USER CODE BEGIN 3 */
 	}
-	/* USER CODE END 3 */
+  /* USER CODE END 3 */
 }
 
 /**
- * @brief System Clock Configuration
- * @retval None
- */
+  * @brief System Clock Configuration
+  * @retval None
+  */
 void SystemClock_Config(void)
 {
-	RCC_OscInitTypeDef RCC_OscInitStruct = {0};
-	RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
+  RCC_OscInitTypeDef RCC_OscInitStruct = {0};
+  RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
 
-	/** Configure the main internal regulator output voltage
-	 */
-	__HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
+  /** Configure the main internal regulator output voltage
+  */
+  __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
 
-	/** Initializes the CPU, AHB and APB buses clocks
-	 */
-	RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
-	RCC_OscInitStruct.HSEState = RCC_HSE_ON;
-	RCC_OscInitStruct.HSEDiv = RCC_HSE_DIV1;
-	RCC_OscInitStruct.PLL.PLLState = RCC_PLL_NONE;
-	if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
-	{
-		Error_Handler();
-	}
+  /** Initializes the CPU, AHB and APB buses clocks
+  */
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+  RCC_OscInitStruct.HSEState = RCC_HSE_ON;
+  RCC_OscInitStruct.HSEDiv = RCC_HSE_DIV1;
+  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_NONE;
+  if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
+  {
+    Error_Handler();
+  }
 
-	/** Configure the SYSCLKSource, HCLK, PCLK1 and PCLK2 clocks dividers
-	 */
-	RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK3|RCC_CLOCKTYPE_HCLK
-			|RCC_CLOCKTYPE_SYSCLK|RCC_CLOCKTYPE_PCLK1
-			|RCC_CLOCKTYPE_PCLK2;
-	RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_HSE;
-	RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
-	RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
-	RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
-	RCC_ClkInitStruct.AHBCLK3Divider = RCC_SYSCLK_DIV1;
+  /** Configure the SYSCLKSource, HCLK, PCLK1 and PCLK2 clocks dividers
+  */
+  RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK3|RCC_CLOCKTYPE_HCLK
+                              |RCC_CLOCKTYPE_SYSCLK|RCC_CLOCKTYPE_PCLK1
+                              |RCC_CLOCKTYPE_PCLK2;
+  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_HSE;
+  RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
+  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
+  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
+  RCC_ClkInitStruct.AHBCLK3Divider = RCC_SYSCLK_DIV1;
 
-	if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_1) != HAL_OK)
-	{
-		Error_Handler();
-	}
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_1) != HAL_OK)
+  {
+    Error_Handler();
+  }
 }
 
 /* USER CODE BEGIN 4 */
@@ -593,7 +669,22 @@ void eventRxDone(pingPongFSM_t *const fsm)
 	SUBGRF_ReadBuffer(rxStartBufferPointer, (uint8_t *)fsm->rxBuffer, payloadLength);
 	HAL_UART_Transmit(&huart1, (uint8_t *)fsm->rxBuffer, 20, HAL_MAX_DELAY);
 	HAL_UART_Transmit(&huart1, (uint8_t *)"\r\n", 2, HAL_MAX_DELAY);
-	HAL_UART_Transmit(&huart1, (uint8_t *)"Rx DONE - Received packet", 25, HAL_MAX_DELAY);
+	//get rssi and snr
+	PacketStatus_t packetStatus;
+	char uartBuff[50];
+	SUBGRF_GetPacketStatus(&packetStatus);
+	sprintf(uartBuff, "RssiValue=%d dBm, SnrValue=%d Hz\r\n", packetStatus.Params.LoRa.RssiPkt, packetStatus.Params.LoRa.SnrPkt);
+	HAL_UART_Transmit(&huart1, (uint8_t *)uartBuff, strlen(uartBuff), HAL_MAX_DELAY);
+
+	//if doing mock instead of real
+	//check if packet starts with A or AB
+	//go to other function
+	//do random between 5 numbers
+	//1 of them is real
+	//4 is mock, but not perfect
+	//pass to LM to do it the most convoluted way
+
+	HAL_UART_Transmit(&huart1, (uint8_t *)"Rx DONE - Received packet\r\n", 27, HAL_MAX_DELAY);
 }
 
 /**
@@ -704,7 +795,7 @@ void enterSlaveTx(pingPongFSM_t *const fsm)
  */
 void transitionRxDone(pingPongFSM_t *const fsm)
 {
-#if TRANSMIT_ONLY == 0
+	//#if TRANSMIT_ONLY == 0
 
 	PacketStatus_t packetStatus;
 	char uartBuff[50];
@@ -719,7 +810,7 @@ void transitionRxDone(pingPongFSM_t *const fsm)
 	sprintf(uartBuff, "RssiValue=%d dBm, SnrValue=%d Hz\r\n", packetStatus.Params.LoRa.RssiPkt, packetStatus.Params.LoRa.SnrPkt);
 	HAL_UART_Transmit(&huart1, (uint8_t *)uartBuff, strlen(uartBuff), HAL_MAX_DELAY);
 
-#endif
+	//#endif
 }
 
 /**
@@ -743,6 +834,21 @@ void checki2cInitialize(I2C_HandleTypeDef *hi2c, UART_HandleTypeDef *huart)
 		HAL_UART_Transmit(huart, (uint8_t*)buffer, sizeof(buffer), HAL_MAX_DELAY);
 	}else{
 		snprintf(buffer, sizeof(buffer),"I2C INIT........................FAIL\r\n");
+		HAL_UART_Transmit(huart, (uint8_t*)buffer, sizeof(buffer), HAL_MAX_DELAY);
+	}
+}
+
+/*
+ * @brief Check i2c2 init
+ */
+void checki2c2Initialize(I2C_HandleTypeDef *hi2c, UART_HandleTypeDef *huart)
+{
+	char buffer[40];
+	if(HAL_I2C_GetState(hi2c) == HAL_I2C_STATE_READY){
+		snprintf(buffer, sizeof(buffer),"I2C2 INIT..........................OK\r\n");
+		HAL_UART_Transmit(huart, (uint8_t*)buffer, sizeof(buffer), HAL_MAX_DELAY);
+	}else{
+		snprintf(buffer, sizeof(buffer),"I2C2 INIT........................FAIL\r\n");
 		HAL_UART_Transmit(huart, (uint8_t*)buffer, sizeof(buffer), HAL_MAX_DELAY);
 	}
 }
@@ -786,33 +892,37 @@ void printBoardInfo(UART_HandleTypeDef *huart)
 void printUid(UART_HandleTypeDef *huart)
 {
 	uint32_t uid[3];
-	char buffer[30];  // 8 chars for hex, 1 for '\r', 1 for '\n', 1 for null terminator
+	char buffer[41];  // 8 chars for hex, 1 for '\r', 1 for '\n', 1 for null terminator
 
 	uid[0] = HAL_GetUIDw0();
 	uid[1] = HAL_GetUIDw1();
 	uid[2] = HAL_GetUIDw2();
 
-	//    for (int i = 0; i < 3; i++)
-	//    {
-	//        snprintf(buffer, sizeof(buffer), "%08lX\r\n", uid[i]);
-	//        HAL_UART_Transmit(huart, (uint8_t*)buffer, strlen(buffer), HAL_MAX_DELAY);
-	//    }
+//	for (int i = 0; i < 3; i++)
+//	{
+//		snprintf(buffer, sizeof(buffer), "%08lX\r\n", uid[i]);
+//		HAL_UART_Transmit(huart, (uint8_t*)buffer, strlen(buffer), HAL_MAX_DELAY);
+//	}
 
-	//show only Device ID
-	snprintf(buffer, sizeof(buffer), "UNIQUE ID : %08lX\r\n", uid[2]);
+//	//show only Device ID
+//	snprintf(buffer, sizeof(buffer), "UNIQUE ID : %08lX\r\n", uid[2]);
+//	HAL_UART_Transmit(huart, (uint8_t*)buffer, strlen(buffer), HAL_MAX_DELAY);
+
+	snprintf(buffer, sizeof(buffer), "UNIQUE ID : %08lX %08lX %08lX\r\n", uid[0], uid[1], uid[2]);
 	HAL_UART_Transmit(huart, (uint8_t*)buffer, strlen(buffer), HAL_MAX_DELAY);
 }
 
 /**
  * @brief FW startup check; compiled with other start checks
  */
-void startUpFWCheck(UART_HandleTypeDef *huart, I2C_HandleTypeDef *hi2c)
+void startUpFWCheck(UART_HandleTypeDef *huart)
 {
 	char buffer[49];
 	//check FW name and version
 	printBoardInfo(huart);
 	//check i2c pins init
-	checki2cInitialize(hi2c, huart);
+	checki2cInitialize(&hi2c1, huart);
+	checki2c2Initialize(&hi2c2, huart);
 	HAL_Delay(50);
 	//check LoRa init
 	checkLoraInit(huart);
@@ -928,7 +1038,6 @@ int8_t user_i2c_write(uint8_t id, uint8_t reg_addr, uint8_t *data, uint16_t len)
 	return 0;
 }
 
-
 /**
  * @brief Get BME280 measurement, save to the 3 vars
  */
@@ -970,6 +1079,7 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size){
 }
 
 void showMenu(UART_HandleTypeDef *huart){
+	HAL_Delay(100);
 	HAL_UART_Transmit(huart, (uint8_t*)"\n\nCM IN GS MODE\r\n", 17, HAL_MAX_DELAY);
 	HAL_UART_Transmit(huart, (uint8_t*)"************************************************\n", 49, HAL_MAX_DELAY);
 	HAL_UART_Transmit(huart, (uint8_t*)"* SELECT OPTION :                              *\n", 49, HAL_MAX_DELAY);
@@ -979,38 +1089,69 @@ void showMenu(UART_HandleTypeDef *huart){
 	HAL_UART_Transmit(huart, (uint8_t*)"* [4] Display current datetime                 *\n", 49, HAL_MAX_DELAY);
 	HAL_UART_Transmit(huart, (uint8_t*)"* [0] Display navigation menu                  *\n", 49, HAL_MAX_DELAY);
 	HAL_UART_Transmit(huart, (uint8_t*)"************************************************\n\n", 50, HAL_MAX_DELAY);
+	HAL_Delay(100);
+}
+
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+	if(rx_buff_int[0] != '\n'){
+		HAL_UART_Transmit(&huart1, rx_buff_int, 1, 100);
+	}
+
+	if(rxDone == false){
+		if(rx_buff_int[0] != '\n'){ //if not end of line
+			rx_buff[rx_buff_count] = rx_buff_int[0];
+			rx_buff_count++;
+		}
+		else{ //if end of line
+			rxDone = true;
+			rx_buff_count = 0;
+		}
+//		if(rx_buff_count >= 20){ //if overrun
+//			rxDone = true;
+//			rx_buff_count = 0;
+//		}
+	}
+	else{
+		rx_buff_count = 0;
+	}
+
+//	rx_buff[rx_buff_count] = rx_buff_int[0];
+//	rx_buff_count++;
+
+	HAL_UART_Receive_IT(&huart1, rx_buff_int, 1);
 }
 
 /* USER CODE END 4 */
 
 /**
- * @brief  This function is executed in case of error occurrence.
- * @retval None
- */
+  * @brief  This function is executed in case of error occurrence.
+  * @retval None
+  */
 void Error_Handler(void)
 {
-	/* USER CODE BEGIN Error_Handler_Debug */
+  /* USER CODE BEGIN Error_Handler_Debug */
 	/* User can add his own implementation to report the HAL error return state */
 	__disable_irq();
 	while (1)
 	{
 	}
-	/* USER CODE END Error_Handler_Debug */
+  /* USER CODE END Error_Handler_Debug */
 }
 
 #ifdef  USE_FULL_ASSERT
 /**
- * @brief  Reports the name of the source file and the source line number
- *         where the assert_param error has occurred.
- * @param  file: pointer to the source file name
- * @param  line: assert_param error line source number
- * @retval None
- */
+  * @brief  Reports the name of the source file and the source line number
+  *         where the assert_param error has occurred.
+  * @param  file: pointer to the source file name
+  * @param  line: assert_param error line source number
+  * @retval None
+  */
 void assert_failed(uint8_t *file, uint32_t line)
 {
-	/* USER CODE BEGIN 6 */
+  /* USER CODE BEGIN 6 */
 	/* User can add his own implementation to report the file name and line number,
      ex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
-	/* USER CODE END 6 */
+  /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */
