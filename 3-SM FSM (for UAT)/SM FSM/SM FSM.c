@@ -68,7 +68,7 @@ typedef struct
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
 #define RF_FREQUENCY                                400000000 /* Hz */ //27222
-#define TX_OUTPUT_POWER                             20	       /* dBm */ //use 12 max for new design?
+#define TX_OUTPUT_POWER                             16	       /* dBm */ //use 12 max for new design?
 #define LORA_BANDWIDTH                              4         /* kHz */
 #define LORA_SPREADING_FACTOR                       10
 #define LORA_CODINGRATE                             1
@@ -78,7 +78,7 @@ typedef struct
 #define TXRX_ENABLED								0	/* 1 = enable Tx/Rx in while loop. 0 = disable any Tx and Rx */
 #define TRANSMIT_ONLY								1	/* 1 = set to transmit only. 0 = ping pong */
 #define RECEIVE_ONLY								1	/* 1 = set to receive only. 0 = ping pong */
-#define FIRMWARE_FILENAME							"CM_WLE55CCU6_2.bin"
+#define FIRMWARE_FILENAME							"CM_SM.bin"
 #define FIRMWARE_VERSION							"0.1"
 #define PAYLOADLENGTH								20
 
@@ -96,7 +96,7 @@ const RadioLoRaBandwidths_t Bandwidths[] = { LORA_BW_125, LORA_BW_250, LORA_BW_5
 uint8_t counter = 0;
 
 //BME280 var
-float temperature;		//change float to something else later
+float temperature;
 float humidity;
 float pressure;
 
@@ -141,8 +141,9 @@ void blinkLED(void);
 void printUid(UART_HandleTypeDef *huart);
 void printBoardInfo(UART_HandleTypeDef *huart);
 void checki2cInitialize(I2C_HandleTypeDef *hi2c, UART_HandleTypeDef *huart);
+void checki2c2Initialize(I2C_HandleTypeDef *hi2c, UART_HandleTypeDef *huart);
 void checkLoraInit(UART_HandleTypeDef *huart);
-void startUpFWCheck(UART_HandleTypeDef *huart, I2C_HandleTypeDef *hi2c);
+void startUpFWCheck(UART_HandleTypeDef *huart);
 uint32_t GetBandwidthInHz(RadioLoRaBandwidths_t bandwidth);
 void switchTransmitOn(void);
 void switchTransmitOff(void);
@@ -170,7 +171,7 @@ int main(void)
 
   /* USER CODE BEGIN 1 */
 	pingPongFSM_t fsm;
-	char uartBuff[100];
+//	char uartBuff[100];
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -241,14 +242,15 @@ int main(void)
   MX_I2C1_Init();
   MX_USART1_UART_Init();
   MX_USART2_UART_Init();
+  MX_I2C2_Init();
   /* USER CODE BEGIN 2 */
 	RadioLoRaBandwidths_t currentBandwidth = Bandwidths[LORA_BANDWIDTH];
 	uint32_t bandwidthHz = GetBandwidthInHz(currentBandwidth);
 
 	HAL_Delay(2000);
 
-	sprintf(uartBuff, "LORA_MODULATION\r\nLORA_BW=%lu Hz\r\nLORA_SF=%d\r\n", bandwidthHz, LORA_SPREADING_FACTOR);
-	HAL_UART_Transmit(&huart1, (uint8_t *)uartBuff, strlen(uartBuff), HAL_MAX_DELAY);
+//	sprintf(uartBuff, "LORA_MODULATION\r\nLORA_BW=%lu Hz\r\nLORA_SF=%d\r\n", bandwidthHz, LORA_SPREADING_FACTOR);
+//	HAL_UART_Transmit(&huart1, (uint8_t *)uartBuff, strlen(uartBuff), HAL_MAX_DELAY);
 	radioInit();
 
 #if RS485_CONNECTED == 1
@@ -301,7 +303,7 @@ int main(void)
 //	fsm.state = STATE_MASTER;
 //	fsm.subState = SSTATE_RX;
 
-	//startUpFWCheck(&huart1, &hi2c1);
+	startUpFWCheck(&huart1);
 	blinkLED();
 
 	while (1) //AAAAAAAAAAAAAAAA
@@ -314,8 +316,8 @@ int main(void)
 		if(SMreadyToTx){
 			HAL_UART_Transmit(&huart1, (uint8_t *)"Tx MODE\r\n", 9, HAL_MAX_DELAY);
 			switchTransmitOn();
-			HAL_Delay(3000); //wait for gs to be in rx before transmitting packet
 			SUBGRF_SetSwitch(RFO_LP, RFSWITCH_TX);
+			HAL_Delay(3000); //wait for gs to be in rx before transmitting packet
 			SUBGRF_WriteRegister(0x0889, (SUBGRF_ReadRegister(0x0889) | 0x04));
 			uint8_t payloadsize = 20; //20 byte as mock packet
 			char payload[21] = "ABCDEFGHIJKLMNOPQRST\0"; //size is payloadsize + 1
@@ -491,6 +493,8 @@ void eventRxDone(pingPongFSM_t *const fsm)
 	switchReceiveOff();
 	HAL_Delay(200);
 
+	HAL_GPIO_WritePin(LDO_EN_GPIO_Port, LDO_EN_Pin, 1);
+
 	uint8_t payloadLength = 0;
 	uint8_t rxStartBufferPointer = 0;
 	char commandOne[2] = "A";
@@ -499,7 +503,7 @@ void eventRxDone(pingPongFSM_t *const fsm)
 	//read command
 	SUBGRF_ReadBuffer(rxStartBufferPointer, (uint8_t *)fsm->rxBuffer, payloadLength);
 	//print command (for debug)
-	HAL_UART_Transmit(&huart1, (uint8_t *)fsm->rxBuffer, 1, HAL_MAX_DELAY);
+	HAL_UART_Transmit(&huart1, (uint8_t *)fsm->rxBuffer, payloadLength, HAL_MAX_DELAY);
 	HAL_UART_Transmit(&huart1, (uint8_t *)"\r\n", 2, HAL_MAX_DELAY);
 
 	char* p = fsm->rxBuffer;
@@ -507,6 +511,8 @@ void eventRxDone(pingPongFSM_t *const fsm)
 		SMreadyToTx = true;
 		HAL_UART_Transmit(&huart1, (uint8_t *)"SM received command to transmit 20 bytes to GS\r\n", 48, HAL_MAX_DELAY);
 	}
+
+	HAL_GPIO_WritePin(LDO_EN_GPIO_Port, LDO_EN_Pin, 0);
 }
 
 /**
@@ -661,6 +667,21 @@ void checki2cInitialize(I2C_HandleTypeDef *hi2c, UART_HandleTypeDef *huart)
 	}
 }
 
+/*
+ * @brief Check i2c2 init
+ */
+void checki2c2Initialize(I2C_HandleTypeDef *hi2c, UART_HandleTypeDef *huart)
+{
+	char buffer[40];
+	if(HAL_I2C_GetState(hi2c) == HAL_I2C_STATE_READY){
+		snprintf(buffer, sizeof(buffer),"I2C2 INIT..........................OK\r\n");
+		HAL_UART_Transmit(huart, (uint8_t*)buffer, sizeof(buffer), HAL_MAX_DELAY);
+	}else{
+		snprintf(buffer, sizeof(buffer),"I2C2 INIT........................FAIL\r\n");
+		HAL_UART_Transmit(huart, (uint8_t*)buffer, sizeof(buffer), HAL_MAX_DELAY);
+	}
+}
+
 /**
  * @brief Check LoRa Init
  */
@@ -700,33 +721,37 @@ void printBoardInfo(UART_HandleTypeDef *huart)
 void printUid(UART_HandleTypeDef *huart)
 {
 	uint32_t uid[3];
-	char buffer[30];  // 8 chars for hex, 1 for '\r', 1 for '\n', 1 for null terminator
+	char buffer[41];  // 8 chars for hex, 1 for '\r', 1 for '\n', 1 for null terminator
 
 	uid[0] = HAL_GetUIDw0();
 	uid[1] = HAL_GetUIDw1();
 	uid[2] = HAL_GetUIDw2();
 
-	//    for (int i = 0; i < 3; i++)
-	//    {
-	//        snprintf(buffer, sizeof(buffer), "%08lX\r\n", uid[i]);
-	//        HAL_UART_Transmit(huart, (uint8_t*)buffer, strlen(buffer), HAL_MAX_DELAY);
-	//    }
+//	for (int i = 0; i < 3; i++)
+//	{
+//		snprintf(buffer, sizeof(buffer), "%08lX\r\n", uid[i]);
+//		HAL_UART_Transmit(huart, (uint8_t*)buffer, strlen(buffer), HAL_MAX_DELAY);
+//	}
 
-	//show only Device ID
-	snprintf(buffer, sizeof(buffer), "UNIQUE ID : %08lX\r\n", uid[2]);
+//	//show only Device ID
+//	snprintf(buffer, sizeof(buffer), "UNIQUE ID : %08lX\r\n", uid[2]);
+//	HAL_UART_Transmit(huart, (uint8_t*)buffer, strlen(buffer), HAL_MAX_DELAY);
+
+	snprintf(buffer, sizeof(buffer), "UNIQUE ID : %08lX %08lX %08lX\r\n", uid[0], uid[1], uid[2]);
 	HAL_UART_Transmit(huart, (uint8_t*)buffer, strlen(buffer), HAL_MAX_DELAY);
 }
 
 /**
  * @brief FW startup check; compiled with other start checks
  */
-void startUpFWCheck(UART_HandleTypeDef *huart, I2C_HandleTypeDef *hi2c)
+void startUpFWCheck(UART_HandleTypeDef *huart)
 {
 	char buffer[49];
 	//check FW name and version
 	printBoardInfo(huart);
 	//check i2c pins init
-	checki2cInitialize(hi2c, huart);
+	checki2cInitialize(&hi2c1, huart);
+	checki2c2Initialize(&hi2c2, huart);
 	HAL_Delay(50);
 	//check LoRa init
 	checkLoraInit(huart);

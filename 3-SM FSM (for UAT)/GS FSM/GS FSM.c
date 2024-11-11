@@ -69,7 +69,7 @@ typedef struct
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
 #define RF_FREQUENCY                                400000000 /* Hz */ //27222
-#define TX_OUTPUT_POWER                             20	       /* dBm */ //use 12 max for new design?
+#define TX_OUTPUT_POWER                             16	       /* dBm */ //use 12 max for new design?
 #define LORA_BANDWIDTH                              4         /* kHz */
 #define LORA_SPREADING_FACTOR                       10
 #define LORA_CODINGRATE                             1
@@ -348,34 +348,32 @@ int main(void)
 		//method 2 : uart receive
 		while(rxDone == false);
 		selection = rx_buff[0];
+		HAL_Delay(50);
 		memset(rx_buff, 0, sizeof(rx_buff));
 		HAL_Delay(50);
 //		selection = rx_buff[0];
 		//only reset the flag after copied everything
 		rxDone = false;
 
-//		snprintf(buffer, sizeof(buffer), "%c ", rx_buff_user[0]);
-//		HAL_UART_Transmit(&huart1, (uint8_t *)buffer, 2, HAL_MAX_DELAY);
-//		snprintf(buffer, sizeof(buffer), "%c ", rx_buff_user[1]);
-//		HAL_UART_Transmit(&huart1, (uint8_t *)buffer, 2, HAL_MAX_DELAY);
-//		snprintf(buffer, sizeof(buffer), "%c ", rx_buff_user[2]);
-//		HAL_UART_Transmit(&huart1, (uint8_t *)buffer, 2, HAL_MAX_DELAY);
-
 
 		switch(selection){
 		case '1':
 			//1 - TX MODE ------------------------------------------------------------------
 			HAL_UART_Transmit(&huart1, (uint8_t *)"Tx MODE\r\n", 9, HAL_MAX_DELAY);
+			HAL_GPIO_WritePin(LDO_EN_GPIO_Port, LDO_EN_Pin, 1);
+			switchTransmitOn();
 			SUBGRF_SetSwitch(RFO_LP, RFSWITCH_TX);
 			SUBGRF_WriteRegister(0x0889, (SUBGRF_ReadRegister(0x0889) | 0x04));
 			uint8_t payloadsize = 1; //1 byte
-			char payload[2] = "A\0"; //size is payloadsize + 1
+			char payload[2] = "A\0"; //size is payloadsize + 1. ABCDEFGHIJKLMNOPQRST
 			packetParams.Params.LoRa.PayloadLength = payloadsize;
 			SUBGRF_SetPacketParams(&packetParams);
 			SUBGRF_SendPayload((uint8_t *)payload, payloadsize, 0);
 			HAL_UART_Transmit(&huart1, (uint8_t *)payload, payloadsize, HAL_MAX_DELAY);
 			HAL_UART_Transmit(&huart1, (uint8_t *)"\r\n", 2, HAL_MAX_DELAY);
 			HAL_Delay(2500);
+			switchTransmitOff();
+			HAL_GPIO_WritePin(LDO_EN_GPIO_Port, LDO_EN_Pin, 0);
 			HAL_UART_Transmit(&huart1, (uint8_t *)"Tx DONE\r\n\n", 10, HAL_MAX_DELAY);
 			//2 - RX MODE ------------------------------------------------------------------
 			HAL_UART_Transmit(&huart1, (uint8_t *)"Rx MODE\r\n", 9, HAL_MAX_DELAY);
@@ -663,6 +661,12 @@ void eventRxDone(pingPongFSM_t *const fsm)
 
 	uint8_t payloadLength = 0;
 	uint8_t rxStartBufferPointer = 0;
+
+	//TEST THIS WORKAROUND
+	// Workaround 15.3 in DS.SX1261-2.W.APP (because following RX w/ timeout sequence)
+	SUBGRF_WriteRegister(0x0920, 0x00);
+	SUBGRF_WriteRegister(0x0944, (SUBGRF_ReadRegister(0x0944) | 0x02));
+
 	//get payload
 	SUBGRF_GetRxBufferStatus(&payloadLength, &rxStartBufferPointer);
 	//read payload
@@ -675,15 +679,6 @@ void eventRxDone(pingPongFSM_t *const fsm)
 	SUBGRF_GetPacketStatus(&packetStatus);
 	sprintf(uartBuff, "RssiValue=%d dBm, SnrValue=%d Hz\r\n", packetStatus.Params.LoRa.RssiPkt, packetStatus.Params.LoRa.SnrPkt);
 	HAL_UART_Transmit(&huart1, (uint8_t *)uartBuff, strlen(uartBuff), HAL_MAX_DELAY);
-
-	//if doing mock instead of real
-	//check if packet starts with A or AB
-	//go to other function
-	//do random between 5 numbers
-	//1 of them is real
-	//4 is mock, but not perfect
-	//pass to LM to do it the most convoluted way
-
 	HAL_UART_Transmit(&huart1, (uint8_t *)"Rx DONE - Received packet\r\n", 27, HAL_MAX_DELAY);
 }
 
