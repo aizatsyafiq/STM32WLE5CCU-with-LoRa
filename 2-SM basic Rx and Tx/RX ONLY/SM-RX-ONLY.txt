@@ -1,0 +1,7 @@
+while(1){		
+		HAL_Delay(1000);
+		enterMasterRx(&fsm);
+		eventReceptor = NULL;
+		while (eventReceptor == NULL);
+		eventReceptor(&fsm);
+}

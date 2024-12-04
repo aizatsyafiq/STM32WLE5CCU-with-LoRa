@@ -1,0 +1,24 @@
+while(1){
+		HAL_Delay(500);
+
+		HAL_GPIO_WritePin(LDO_EN_GPIO_Port, LDO_EN_Pin, 1);
+		HAL_Delay(200);
+		HAL_GPIO_WritePin(LDO_EN_GPIO_Port, LDO_EN_Pin, 0);
+
+		HAL_UART_Transmit(&huart1, (uint8_t *)"Tx MODE\r\n", 9, HAL_MAX_DELAY);
+		switchTransmitOn();
+		SUBGRF_SetSwitch(RFO_LP, RFSWITCH_TX);
+		HAL_Delay(500);
+		SUBGRF_WriteRegister(0x0889, (SUBGRF_ReadRegister(0x0889) | 0x04));
+		uint8_t payloadsize = 20; //20 byte as mock packet
+		char payload[21] = "ABCDEFGHIJKLMNOPQRST\0"; //size is payloadsize + 1
+		packetParams.Params.LoRa.PayloadLength = payloadsize;
+		SUBGRF_SetPacketParams(&packetParams);
+		SUBGRF_SendPayload((uint8_t *)payload, payloadsize, 0);
+		HAL_UART_Transmit(&huart1, (uint8_t *)payload, payloadsize, HAL_MAX_DELAY);
+		HAL_UART_Transmit(&huart1, (uint8_t *)"\r\n", 2, HAL_MAX_DELAY);
+		HAL_Delay(8000);
+		switchTransmitOff();
+		HAL_UART_Transmit(&huart1, (uint8_t *)"Tx DONE\r\n\n", 10, HAL_MAX_DELAY);
+
+}
